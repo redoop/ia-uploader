@@ -14,7 +14,9 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Internet Archive Uploader</string>
-<key>CFBundleDisplayName</key><string>Internet Archive 上传器</string>
+<key>CFBundleDisplayName</key><string>Internet Archive Uploader</string>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string><string>zh-Hant</string></array>
 <key>CFBundleIdentifier</key><string>org.local.ia-uploader</string>
 <key>CFBundleExecutable</key><string>ia-uploader</string>
 <key>CFBundlePackageType</key><string>APPL</string>
@@ -24,4 +26,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+mkdir -p "$app/Contents/Resources/en.lproj" "$app/Contents/Resources/zh-Hans.lproj" "$app/Contents/Resources/zh-Hant.lproj"
+printf '%s\n' '"CFBundleDisplayName" = "Internet Archive Uploader";' > "$app/Contents/Resources/en.lproj/InfoPlist.strings"
+printf '%s\n' '"CFBundleDisplayName" = "Internet Archive 上传器";' > "$app/Contents/Resources/zh-Hans.lproj/InfoPlist.strings"
+cp "$app/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" "$app/Contents/Resources/zh-Hant.lproj/InfoPlist.strings"
 printf '%s\n' "已生成 $app 和 dist/ia-upload-cli"

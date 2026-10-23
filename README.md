@@ -10,7 +10,7 @@ Internet Archive Uploader is an independent, MIT-licensed Rust application with 
 
 Use the desktop app to select files and track progress, or use the CLI for scripts and repeatable upload workflows.
 
-[Download v0.1.1 for Apple Silicon Mac](https://github.com/redoop/ia-uploader/releases/download/v0.1.1/Internet-Archive-Uploader-0.1.1-macOS-arm64.dmg) · [All releases](https://github.com/redoop/ia-uploader/releases)
+[Download v0.1.2 for Apple Silicon Mac](https://github.com/redoop/ia-uploader/releases/download/v0.1.2/Internet-Archive-Uploader-0.1.2-macOS-arm64.dmg) · [All releases](https://github.com/redoop/ia-uploader/releases)
 
 ## Features
 
@@ -26,20 +26,32 @@ Credentials are kept in memory for the running session and are not saved by the 
 
 ## Install on macOS
 
-1. Download the [Apple Silicon DMG](https://github.com/redoop/ia-uploader/releases/download/v0.1.1/Internet-Archive-Uploader-0.1.1-macOS-arm64.dmg).
+1. Download the [Apple Silicon DMG](https://github.com/redoop/ia-uploader/releases/download/v0.1.2/Internet-Archive-Uploader-0.1.2-macOS-arm64.dmg).
 2. Open it and drag **Internet Archive Uploader.app** into **Applications**.
 3. Launch the app and enter your Internet Archive S3 credentials.
 
-The current release is for **Apple Silicon Macs (arm64)**. The application has an ad-hoc signature and has not been signed with an Apple Developer identity or notarized. Builds and runtime checks have been performed on macOS; Windows and Linux have not been validated. The current desktop interface and CLI messages are in Chinese; this README documents them in English.
+The current release is for **Apple Silicon Macs (arm64)**. The application has an ad-hoc signature and has not been signed with an Apple Developer identity or notarized. Builds and runtime checks have been performed on macOS; Windows and Linux have not been validated. The desktop interface, upload messages, and CLI help support Chinese and English and select the language automatically at startup.
 
 The DMG also includes `ia-upload-cli`, which you can copy to a directory of your choice.
 
 ### Verify the download
 
-Download the `.dmg` and `.sha256` files from the [release page](https://github.com/redoop/ia-uploader/releases/tag/v0.1.1) into the same directory, then run:
+Download the `.dmg` and `.sha256` files from the [release page](https://github.com/redoop/ia-uploader/releases/tag/v0.1.2) into the same directory, then run:
 
 ```sh
-shasum -a 256 -c Internet-Archive-Uploader-0.1.1-macOS-arm64.dmg.sha256
+shasum -a 256 -c Internet-Archive-Uploader-0.1.2-macOS-arm64.dmg.sha256
+```
+
+## Interface language
+
+The app and CLI follow the operating system's preferred language at startup: Chinese (`zh`, including Simplified and Traditional Chinese locales) selects Simplified Chinese text; all other locales select English. macOS uses the first entry in AppleLanguages, Windows uses the user's UI language, and Linux uses locale environment variables. Restart the app after changing the OS language.
+
+You can override the CLI language with `--lang auto|zh|en`, or set `IA_UPLOADER_LANG=zh` / `IA_UPLOADER_LANG=en` for either executable. An explicit CLI flag takes precedence over the environment variable. Language selection does not change credentials, filenames, metadata, or upload behavior.
+
+```sh
+./target/release/ia-upload-cli --lang en --help
+./target/release/ia-upload-cli auth --lang zh
+IA_UPLOADER_LANG=en cargo run --bin ia-uploader
 ```
 
 ## Desktop workflow
@@ -142,7 +154,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-The v0.1.1 test suite includes 14 tests covering authentication rejection, redirect boundaries and full-body replay, transient failures, retry exhaustion, proxy routing, Unicode encoding, identifier validation, 5 GiB sparse-file reads, cancellation during reads, GUI state, and logo decoding. HTTP tests bind local loopback ports and use dummy credentials; they do not upload to Internet Archive.
+The v0.1.2 test suite includes 20 tests covering authentication rejection, redirect boundaries and full-body replay, transient failures, retry exhaustion, proxy routing, Unicode encoding, identifier validation, 5 GiB sparse-file reads, cancellation during reads, GUI state, logo decoding, locale detection, bilingual rendering, and CLI language overrides. HTTP tests bind local loopback ports and use dummy credentials; they do not upload to Internet Archive.
 
 ## macOS packaging
 
@@ -151,7 +163,7 @@ sh scripts/package-macos.sh
 sh scripts/package-dmg.sh
 ```
 
-The DMG script builds for the host architecture and creates an installer and a SHA-256 file in `dist/`. It requires macOS command-line developer tools and Python 3. The installer contains the app, an Applications shortcut, the CLI, and Chinese installation instructions.
+The DMG script builds for the host architecture and creates an installer and a SHA-256 file in `dist/`. It requires macOS command-line developer tools and Python 3. The installer contains the app, an Applications shortcut, the CLI, and bilingual installation instructions.
 
 The original logo is in `assets/logo-v1.png`; its generation prompt is in `assets/logo-prompt.txt`. Packaging generates the multi-size `assets/AppIcon.icns` and embeds the volume icon inside the DMG. The external DMG's Finder icon uses macOS extended metadata, which some transfer tools strip; the mounted-volume icon remains part of the image.
 

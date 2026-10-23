@@ -1,5 +1,7 @@
+pub mod i18n;
 use anyhow::{Context, Result, bail, ensure};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+pub use i18n::Language;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use reqwest::{
     Url,
@@ -14,23 +16,26 @@ use std::{
 };
 
 #[derive(Parser)]
-#[command(version, about = "Internet Archive 大文件上传工具（S3 API 凭据认证）")]
+#[command(version, about = "Internet Archive large-file uploader")]
 pub struct Cli {
-    /// 手动代理地址，例如 http://127.0.0.1:7890 或 socks5h://127.0.0.1:7890
+    /// Proxy URL, e.g. http://127.0.0.1:7890 or socks5h://127.0.0.1:7890
     #[arg(long, global = true, conflicts_with = "direct")]
     pub proxy: Option<String>,
-    /// 忽略系统及环境变量代理，直接连接
+    /// Ignore system/environment proxies and connect directly
     #[arg(long, global = true)]
     pub direct: bool,
+    /// Interface language: auto, zh, or en
+    #[arg(long, global = true, default_value = "auto", env = "IA_UPLOADER_LANG", value_parser = ["auto", "zh", "en"])]
+    pub lang: String,
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// 验证 IA_ACCESS_KEY 和 IA_SECRET_KEY，不上传文件
+    /// Verify IA_ACCESS_KEY and IA_SECRET_KEY without uploading
     Auth,
-    /// 验证凭据后依次上传文件；同名远端文件会被替换并保留旧版本
+    /// Verify credentials, then upload files sequentially; preserve old versions
     Upload {
         /// Internet Archive item identifier
         identifier: String,
@@ -42,33 +47,180 @@ pub enum Command {
         mediatype: String,
         #[arg(long, default_value = "opensource")]
         collection: String,
-        /// 每个文件的额外重试次数
+        /// Additional retry attempts for each file
         #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(0..=10))]
         retries: u32,
-        /// 禁止服务端生成派生文件
+        /// Skip server-side derivative generation
         #[arg(long)]
         no_derive: bool,
     },
 }
 
+impl Cli {
+    pub fn language(&self) -> Language {
+        match self.lang.as_str() {
+            "zh" => Language::Zh,
+            "en" => Language::En,
+            _ => Language::system(),
+        }
+    }
+    pub fn parse_localized() -> Self {
+        let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+        let language = cli_language(&args);
+        let matches = localized_cli(language).get_matches_from(args);
+        Self::from_arg_matches(&matches).expect("validated command-line arguments")
+    }
+}
+fn cli_language(args: &[std::ffi::OsString]) -> Language {
+    let mut choice = std::env::var("IA_UPLOADER_LANG").unwrap_or_else(|_| "auto".into());
+    let mut args = args.iter().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--lang" {
+            if let Some(value) = args.next() {
+                choice = value.to_string_lossy().into();
+            }
+        } else if let Some(value) = arg.to_str().and_then(|s| s.strip_prefix("--lang=")) {
+            choice = value.into();
+        }
+    }
+    match choice.as_str() {
+        "zh" => Language::Zh,
+        "en" => Language::En,
+        _ => Language::system(),
+    }
+}
+fn localized_cli(lang: Language) -> clap::Command {
+    let options = lang.text("选项", "Options");
+    let arguments = lang.text("参数", "Arguments");
+    let mut command = Cli::command()
+        .about(lang.text(
+            "Internet Archive 大文件上传工具（S3 API 凭据认证）",
+            "Internet Archive large-file uploader (S3 credential authentication)",
+        ))
+        .disable_help_subcommand(true)
+        .subcommand_help_heading(lang.text("命令", "Commands"))
+        .mut_arg("proxy", |arg| {
+            arg.help(lang.text(
+                "手动代理地址，例如 http://127.0.0.1:7890",
+                "Proxy URL, e.g. http://127.0.0.1:7890",
+            ))
+        })
+        .mut_arg("direct", |arg| {
+            arg.help(lang.text(
+                "忽略系统及环境变量代理，直接连接",
+                "Ignore system/environment proxies and connect directly",
+            ))
+        })
+        .mut_arg("lang", |arg| {
+            arg.help(lang.text(
+                "界面语言：auto 跟随系统，zh 中文，en 英文",
+                "Language: auto follows the OS, zh for Chinese, en for English",
+            ))
+        })
+        .mut_args(|arg| arg.help_heading(options))
+        .mut_subcommand("auth", |cmd| {
+            cmd.about(lang.text(
+                "验证 IA_ACCESS_KEY 和 IA_SECRET_KEY，不上传文件",
+                "Verify IA_ACCESS_KEY and IA_SECRET_KEY without uploading",
+            ))
+        })
+        .mut_subcommand("upload", |cmd| {
+            cmd.about(lang.text(
+                "验证凭据后依次上传文件；同名远端文件会被替换并保留旧版本",
+                "Verify credentials and upload files sequentially; preserve old versions",
+            ))
+            .mut_arg("identifier", |a| {
+                a.help(lang.text(
+                    "Internet Archive 归档唯一标识",
+                    "Internet Archive item identifier",
+                ))
+            })
+            .mut_arg("files", |a| {
+                a.help(lang.text("待上传文件路径", "Paths of files to upload"))
+            })
+            .mut_arg("title", |a| a.help(lang.text("归档标题", "Item title")))
+            .mut_arg("mediatype", |a| a.help(lang.text("媒体类型", "Media type")))
+            .mut_arg("collection", |a| {
+                a.help(lang.text("目标 collection", "Destination collection"))
+            })
+            .mut_arg("retries", |a| {
+                a.help(lang.text(
+                    "每个文件的额外重试次数",
+                    "Additional retry attempts per file",
+                ))
+            })
+            .mut_arg("no_derive", |a| {
+                a.help(lang.text(
+                    "禁止服务端生成派生文件",
+                    "Skip server-side derivative generation",
+                ))
+            })
+            .mut_args(|arg| {
+                let heading = if arg.is_positional() {
+                    arguments
+                } else {
+                    options
+                };
+                arg.help_heading(heading)
+            })
+        });
+    // Build once so Clap's generated help/version flags can share the same
+    // localized heading as the application flags, avoiding duplicate groups.
+    command.build();
+    let template = lang.text(
+        "{about-with-newline}\n用法：{usage}\n\n{all-args}{after-help}",
+        "{about-with-newline}\nUsage: {usage}\n\n{all-args}{after-help}",
+    );
+    command
+        .help_template(template)
+        .mut_arg("help", |arg| {
+            arg.help(lang.text("显示帮助", "Print help"))
+                .help_heading(options)
+        })
+        .mut_arg("version", |arg| {
+            arg.help(lang.text("显示版本", "Print version"))
+                .help_heading(options)
+        })
+        .mut_subcommands(|cmd| {
+            cmd.help_template(template).mut_arg("help", |arg| {
+                arg.help(lang.text("显示帮助", "Print help"))
+                    .help_heading(options)
+            })
+        })
+}
+
 pub fn credentials() -> Result<HeaderValue> {
-    let access = std::env::var("IA_ACCESS_KEY")
-        .context("请设置 IA_ACCESS_KEY；在 https://archive.org/account/s3.php 获取凭据")?;
-    let secret = std::env::var("IA_SECRET_KEY").context("请设置 IA_SECRET_KEY")?;
+    credentials_in(Language::detect())
+}
+
+pub fn credentials_in(lang: Language) -> Result<HeaderValue> {
+    let access = std::env::var("IA_ACCESS_KEY").context(lang.text(
+        "请设置 IA_ACCESS_KEY；在 https://archive.org/account/s3.php 获取凭据",
+        "Set IA_ACCESS_KEY; get credentials at https://archive.org/account/s3.php",
+    ))?;
+    let secret = std::env::var("IA_SECRET_KEY")
+        .context(lang.text("请设置 IA_SECRET_KEY", "Set IA_SECRET_KEY"))?;
     ensure!(
         !access.trim().is_empty() && !secret.trim().is_empty(),
-        "凭据不能为空"
+        lang.text("凭据不能为空", "Credentials must not be empty")
     );
-    auth_header(&access, &secret)
+    auth_header_in(&access, &secret, lang)
 }
 
 pub fn auth_header(access: &str, secret: &str) -> Result<HeaderValue> {
+    auth_header_in(access, secret, Language::detect())
+}
+
+pub fn auth_header_in(access: &str, secret: &str, lang: Language) -> Result<HeaderValue> {
     ensure!(
         !access.trim().is_empty() && !secret.trim().is_empty(),
-        "凭据不能为空"
+        lang.text("凭据不能为空", "Credentials must not be empty")
     );
     let mut value = HeaderValue::from_str(&format!("LOW {access}:{secret}"))
-        .map_err(|_| anyhow::anyhow!("凭据格式无效"))?;
+        .map_err(|_| anyhow::anyhow!(lang.text("凭据格式无效", "Invalid credential format")))?;
     value.set_sensitive(true);
     Ok(value)
 }
@@ -105,7 +257,7 @@ fn metadata(s: &str) -> String {
     format!("uri({})", utf8_percent_encode(s, NON_ALPHANUMERIC))
 }
 
-fn authenticate(client: &Client, auth: &HeaderValue, base: &Url) -> Result<()> {
+fn authenticate(client: &Client, auth: &HeaderValue, base: &Url, lang: Language) -> Result<()> {
     let response = client
         .get(base.join("?check_auth=1")?)
         .header(AUTHORIZATION, auth.clone())
@@ -113,22 +265,28 @@ fn authenticate(client: &Client, auth: &HeaderValue, base: &Url) -> Result<()> {
         .send()
         .map_err(|e| {
             if e.is_timeout() || e.is_connect() {
-                anyhow::anyhow!("无法连接 Internet Archive（连接失败或超时）。请检查网络及代理设置；如使用 Clash，请选自动代理或填写 http://127.0.0.1:7890。这不代表密钥无效。")
+                anyhow::anyhow!(lang.text("无法连接 Internet Archive（连接失败或超时）。请检查网络及代理设置；如使用 Clash，请选自动代理或填写 http://127.0.0.1:7890。这不代表密钥无效。", "Cannot connect to Internet Archive (connection failed or timed out). Check your network and proxy settings. For Clash, use automatic proxy or http://127.0.0.1:7890. This does not mean your keys are invalid."))
             } else {
-                anyhow::anyhow!("验证请求失败：{}", e.without_url())
+                anyhow::anyhow!(tr!(lang, "验证请求失败：{}", "Authentication request failed: {}", e.without_url()))
             }
         })?;
     ensure!(
         response.status().is_success(),
-        "认证失败，HTTP {}",
-        response.status()
+        tr!(
+            lang,
+            "认证失败，HTTP {}",
+            "Authentication failed: HTTP {}",
+            response.status()
+        )
     );
-    let value: serde_json::Value = response.json().context("认证响应不是 JSON")?;
+    let value: serde_json::Value = response
+        .json()
+        .context(lang.text("认证响应不是 JSON", "Authentication response is not JSON"))?;
     ensure!(
         value
             .get("error")
             .is_none_or(|v| v.is_null() || v == false || v == ""),
-        "凭据验证失败"
+        lang.text("凭据验证失败", "Credential verification failed")
     );
     // Fail closed: a random successful JSON response is not proof of authentication.
     ensure!(
@@ -136,9 +294,12 @@ fn authenticate(client: &Client, auth: &HeaderValue, base: &Url) -> Result<()> {
             .get("username")
             .and_then(|v| v.as_str())
             .is_some_and(|s| !s.is_empty()),
-        "认证响应缺少 username，无法确认身份"
+        lang.text(
+            "认证响应缺少 username，无法确认身份",
+            "Authentication response has no username; identity could not be verified"
+        )
     );
-    println!("账号验证成功");
+    println!("{}", lang.text("账号验证成功", "Account verified"));
     Ok(())
 }
 
@@ -157,16 +318,28 @@ pub enum Network {
     Direct,
     Proxy(String),
 }
+#[cfg(test)]
 fn proxy_url(raw: &str) -> Result<Url> {
-    let url = Url::parse(raw)
-        .map_err(|_| anyhow::anyhow!("代理地址无效，示例：http://127.0.0.1:7890"))?;
+    proxy_url_in(raw, Language::En)
+}
+
+fn proxy_url_in(raw: &str, lang: Language) -> Result<Url> {
+    let url = Url::parse(raw).map_err(|_| {
+        anyhow::anyhow!(lang.text(
+            "代理地址无效，示例：http://127.0.0.1:7890",
+            "Invalid proxy URL; example: http://127.0.0.1:7890"
+        ))
+    })?;
     ensure!(
         matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
             && url.host_str().is_some()
             && url.query().is_none()
             && url.fragment().is_none()
             && matches!(url.path(), "" | "/"),
-        "代理地址须使用 HTTP、HTTPS 或 SOCKS5 协议，不应包含路径、查询参数或片段"
+        lang.text(
+            "代理地址须使用 HTTP、HTTPS 或 SOCKS5 协议，不应包含路径、查询参数或片段",
+            "Proxy URL must use HTTP, HTTPS or SOCKS5, without a path, query or fragment"
+        )
     );
     Ok(url)
 }
@@ -176,6 +349,7 @@ pub struct Control {
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub events: Option<std::sync::mpsc::Sender<Event>>,
     pub network: Network,
+    pub language: Language,
 }
 impl Control {
     fn emit(&self, event: Event) {
@@ -184,9 +358,10 @@ impl Control {
         }
     }
     fn check(&self) -> Result<()> {
+        let lang = self.language;
         ensure!(
             !self.cancel.load(std::sync::atomic::Ordering::Relaxed),
-            "上传已取消"
+            lang.text("上传已取消", "Upload cancelled")
         );
         Ok(())
     }
@@ -202,21 +377,29 @@ struct Progress {
 }
 impl Read for Progress {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let lang = self.control.language;
         if self
             .control
             .cancel
             .load(std::sync::atomic::Ordering::Relaxed)
         {
-            return Err(io::Error::other("上传已取消"));
+            return Err(io::Error::other(
+                lang.text("上传已取消", "Upload cancelled"),
+            ));
         }
         let n = self.file.read(buf)?;
         self.sent += n as u64;
         if self.last.elapsed() >= Duration::from_millis(500) || n == 0 {
             eprint!(
-                "\r已发送 {:.2}/{:.2} GiB  {:.2} MiB/s（等待服务端确认）",
-                self.sent as f64 / 1073741824.,
-                self.total as f64 / 1073741824.,
-                self.sent as f64 / 1048576. / self.started.elapsed().as_secs_f64().max(0.001)
+                "{}",
+                tr!(
+                    lang,
+                    "\r已发送 {:.2}/{:.2} GiB  {:.2} MiB/s（等待服务端确认）",
+                    "\rSent {:.2}/{:.2} GiB  {:.2} MiB/s (awaiting server confirmation)",
+                    self.sent as f64 / 1073741824.,
+                    self.total as f64 / 1073741824.,
+                    self.sent as f64 / 1048576. / self.started.elapsed().as_secs_f64().max(0.001)
+                )
             );
             self.control.emit(Event::Progress(
                 self.sent,
@@ -230,6 +413,7 @@ impl Read for Progress {
 }
 
 pub fn run(cli: Cli) -> Result<()> {
+    let lang = cli.language();
     let network = if cli.direct {
         Network::Direct
     } else if let Some(proxy) = cli.proxy {
@@ -239,9 +423,10 @@ pub fn run(cli: Cli) -> Result<()> {
     };
     execute(
         cli.command,
-        credentials()?,
+        credentials_in(lang)?,
         Control {
             network,
+            language: lang,
             ..Default::default()
         },
     )
@@ -264,6 +449,7 @@ fn execute_at(
     base: Url,
     allowed: fn(&Url) -> bool,
 ) -> Result<()> {
+    let lang = control.language;
     let builder = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(30))
@@ -274,15 +460,18 @@ fn execute_at(
     let builder = match &control.network {
         Network::Auto => builder,
         Network::Direct => builder.no_proxy(),
-        Network::Proxy(raw) => builder.no_proxy().proxy(
-            reqwest::Proxy::all(proxy_url(raw)?)
-                .map_err(|_| anyhow::anyhow!("无法创建代理配置"))?,
-        ),
+        Network::Proxy(raw) => {
+            builder
+                .no_proxy()
+                .proxy(reqwest::Proxy::all(proxy_url_in(raw, lang)?).map_err(|_| {
+                    anyhow::anyhow!(lang.text("无法创建代理配置", "Could not configure proxy"))
+                })?)
+        }
     };
     let client = builder.build()?;
     match command {
         Command::Auth => {
-            authenticate(&client, &auth, &base)?;
+            authenticate(&client, &auth, &base, lang)?;
             control.emit(Event::Verified);
             Ok(())
         }
@@ -297,40 +486,66 @@ fn execute_at(
         } => {
             ensure!(
                 identifier_valid(&identifier),
-                "identifier 必须为 5–100 个 ASCII 字母、数字、点、下划线或横线，且以字母或数字开头"
+                lang.text("identifier 必须为 5–100 个 ASCII 字母、数字、点、下划线或横线，且以字母或数字开头", "Identifier must contain 5–100 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit")
             );
             // Validate the entire queue before making any changes remotely.
             let mut names = std::collections::HashSet::new();
             let mut queue = Vec::new();
             let mut total = 0u64;
             for path in files {
-                let file =
-                    File::open(&path).with_context(|| format!("无法打开 {}", path.display()))?;
+                let file = File::open(&path)
+                    .with_context(|| tr!(lang, "无法打开 {}", "Cannot open {}", path.display()))?;
                 let info = file.metadata()?;
-                ensure!(info.is_file(), "{} 不是普通文件", path.display());
+                ensure!(
+                    info.is_file(),
+                    tr!(
+                        lang,
+                        "{} 不是普通文件",
+                        "{} is not a regular file",
+                        path.display()
+                    )
+                );
                 let name = path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .context("文件名须为 UTF-8")?
+                    .context(lang.text("文件名须为 UTF-8", "Filename must be valid UTF-8"))?
                     .to_owned();
                 ensure!(
                     name != "." && name != ".." && !name.contains('\\'),
-                    "无效文件名"
+                    lang.text("无效文件名", "Invalid filename")
                 );
-                ensure!(names.insert(name.clone()), "队列包含同名文件：{name}");
-                total = total.checked_add(info.len()).context("文件总大小溢出")?;
+                ensure!(
+                    names.insert(name.clone()),
+                    tr!(
+                        lang,
+                        "队列包含同名文件：{name}",
+                        "Duplicate filename in queue: {name}"
+                    )
+                );
+                total = total
+                    .checked_add(info.len())
+                    .context(lang.text("文件总大小溢出", "Total file size overflow"))?;
                 queue.push((path, name, info.len(), info.modified()?));
             }
             control.check()?;
-            authenticate(&client, &auth, &base)?;
+            authenticate(&client, &auth, &base, lang)?;
             control.emit(Event::Verified);
             for (path, name, size, modified) in queue {
-                println!("上传 {}（{} 字节）", path.display(), size);
+                println!(
+                    "{}",
+                    tr!(
+                        lang,
+                        "上传 {}（{} 字节）",
+                        "Uploading {} ({} bytes)",
+                        path.display(),
+                        size
+                    )
+                );
                 control.emit(Event::Started(name.clone(), size));
                 let mut original = base.clone();
                 original
                     .path_segments_mut()
-                    .map_err(|_| anyhow::anyhow!("无效端点"))?
+                    .map_err(|_| anyhow::anyhow!(lang.text("无效端点", "Invalid endpoint")))?
                     .pop_if_empty()
                     .push(&identifier)
                     .push(&name);
@@ -340,12 +555,21 @@ fn execute_at(
                     let mut retryable = false;
                     for redirects in 0..=5 {
                         control.check()?;
-                        ensure!(allowed(&url), "拒绝向非可信地址发送凭据");
+                        ensure!(
+                            allowed(&url),
+                            lang.text(
+                                "拒绝向非可信地址发送凭据",
+                                "Refusing to send credentials to an untrusted address"
+                            )
+                        );
                         let file = File::open(&path)?;
                         let info = file.metadata()?;
                         ensure!(
                             info.len() == size && info.modified()? == modified,
-                            "源文件已改变，请重新运行"
+                            lang.text(
+                                "源文件已改变，请重新运行",
+                                "Source file changed; restart the upload"
+                            )
                         );
                         let stream = Progress {
                             control: control.clone(),
@@ -373,7 +597,15 @@ fn execute_at(
                             .body(Body::sized(stream, size));
                         match request.send() {
                             Err(e) => {
-                                eprintln!("\n网络请求失败：{}", e.without_url());
+                                eprintln!(
+                                    "{}",
+                                    tr!(
+                                        lang,
+                                        "\n网络请求失败：{}",
+                                        "\nNetwork request failed: {}",
+                                        e.without_url()
+                                    )
+                                );
                                 retryable = true;
                                 break;
                             }
@@ -384,23 +616,40 @@ fn execute_at(
                                     break;
                                 }
                                 if status.as_u16() == 307 || status.as_u16() == 308 {
-                                    ensure!(redirects < 5, "重定向次数过多");
+                                    ensure!(
+                                        redirects < 5,
+                                        lang.text("重定向次数过多", "Too many redirects")
+                                    );
                                     let location = response
                                         .headers()
                                         .get(LOCATION)
-                                        .context("重定向缺少 Location")?
+                                        .context(lang.text(
+                                            "重定向缺少 Location",
+                                            "Redirect has no Location header",
+                                        ))?
                                         .to_str()?;
-                                    url = url.join(location).context("无效重定向")?;
+                                    url = url
+                                        .join(location)
+                                        .context(lang.text("无效重定向", "Invalid redirect"))?;
                                     continue;
                                 }
                                 if status.as_u16() == 429 || status.is_server_error() {
-                                    eprintln!("\n服务器暂不可用：HTTP {status}");
+                                    eprintln!(
+                                        "{}",
+                                        tr!(
+                                            lang,
+                                            "\n服务器暂不可用：HTTP {status}",
+                                            "\nServer temporarily unavailable: HTTP {status}"
+                                        )
+                                    );
                                     retryable = true;
                                     break;
                                 }
-                                bail!(
-                                    "上传被拒绝：HTTP {status}（检查 item 所有权、collection 权限及凭据）"
-                                );
+                                bail!(tr!(
+                                    lang,
+                                    "上传被拒绝：HTTP {status}（检查 item 所有权、collection 权限及凭据）",
+                                    "Upload rejected: HTTP {status} (check item ownership, collection permissions and credentials)"
+                                ));
                             }
                         }
                     }
@@ -409,14 +658,23 @@ fn execute_at(
                         break;
                     }
                     if !retryable || attempt == retries {
-                        bail!("上传失败：{name}；再次运行将从文件开头重传");
+                        bail!(tr!(
+                            lang,
+                            "上传失败：{name}；再次运行将从文件开头重传",
+                            "Upload failed: {name}; running again will restart the file from the beginning"
+                        ));
                     }
                     let delay = Duration::from_secs((2u64.pow(attempt + 1)).min(60));
                     eprintln!(
-                        "{} 秒后重试 {}/{}（从文件开头重传）",
-                        delay.as_secs(),
-                        attempt + 1,
-                        retries
+                        "{}",
+                        tr!(
+                            lang,
+                            "{} 秒后重试 {}/{}（从文件开头重传）",
+                            "Retrying in {} seconds, attempt {}/{} (restarting the file)",
+                            delay.as_secs(),
+                            attempt + 1,
+                            retries
+                        )
                     );
                     control.emit(Event::Retry(attempt + 1));
                     for _ in 0..delay.as_millis() / 100 {
@@ -425,9 +683,19 @@ fn execute_at(
                     }
                 }
                 control.emit(Event::Accepted(name.clone()));
-                println!("\n服务端已接受：{name}");
+                println!(
+                    "{}",
+                    tr!(lang, "\n服务端已接受：{name}", "\nServer accepted: {name}")
+                );
             }
-            println!("上传完成：https://archive.org/details/{identifier}（归档处理可能需要等待）");
+            println!(
+                "{}",
+                tr!(
+                    lang,
+                    "上传完成：https://archive.org/details/{identifier}（归档处理可能需要等待）",
+                    "Upload complete: https://archive.org/details/{identifier} (archival processing may take time)"
+                )
+            );
             Ok(())
         }
     }
@@ -456,6 +724,48 @@ mod tests {
         assert!(url.fragment().is_none());
         assert_eq!(url.path_segments().unwrap().count(), 2);
         assert_eq!(metadata("标题"), "uri(%E6%A0%87%E9%A2%98)");
+    }
+    #[test]
+    fn cli_help_and_errors_use_selected_language() {
+        for lang in [Language::En, Language::Zh] {
+            let mut command = localized_cli(lang);
+            let help = command.render_long_help().to_string();
+            assert!(help.contains(lang.text("界面语言", "Language:")), "{help}");
+            assert!(
+                help.contains(lang.text("手动代理地址", "Proxy URL")),
+                "{help}"
+            );
+            let upload = command
+                .find_subcommand_mut("upload")
+                .unwrap()
+                .render_long_help()
+                .to_string();
+            assert!(
+                upload.contains(lang.text(
+                    "每个文件的额外重试次数",
+                    "Additional retry attempts per file"
+                )),
+                "{upload}"
+            );
+            let error = auth_header_in("", "", lang).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                lang.text("凭据不能为空", "Credentials must not be empty")
+            );
+            if lang == Language::En {
+                assert!(!help.chars().any(|c| ('\u{3400}'..='\u{9fff}').contains(&c)));
+            }
+            let args: Vec<std::ffi::OsString> = [
+                "ia-upload-cli",
+                "auth",
+                "--lang",
+                if lang == Language::Zh { "zh" } else { "en" },
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+            assert_eq!(cli_language(&args), lang);
+        }
     }
     #[test]
     fn identifiers_reject_paths() {

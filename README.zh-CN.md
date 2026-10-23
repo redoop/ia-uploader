@@ -4,7 +4,7 @@
 
 <p align="center"><img src="assets/logo-v1.png" width="160" alt="Internet Archive 上传器 Logo"></p>
 
-[下载 macOS Apple Silicon 安装包（v0.1.1）](https://github.com/redoop/ia-uploader/releases/tag/v0.1.1) · [所有版本](https://github.com/redoop/ia-uploader/releases)
+[下载 macOS Apple Silicon 安装包（v0.1.2）](https://github.com/redoop/ia-uploader/releases/tag/v0.1.2) · [所有版本](https://github.com/redoop/ia-uploader/releases)
 
 Rust 编写的 Internet Archive 上传软件，同时提供原生桌面界面和命令行入口，共用认证、上传、重试逻辑。通过 S3 API Key 验证账号，然后以固定内存流式上传大文件。支持中文文件名/标题、多个文件顺序上传、发送进度与速率、网络错误及 HTTP 429/5xx 指数退避重试、307/308 重定向重新打开文件发送。凭据只发送到 HTTPS archive.org 或其子域，不写入磁盘或日志。
 
@@ -22,6 +22,18 @@ cargo build --release --locked
 - `target/release/ia-upload-cli`：命令行工具。
 
 仅需命令行时，可跳过全部界面依赖：`cargo build --release --locked --no-default-features --bin ia-upload-cli`。
+
+## 界面语言
+
+桌面界面、状态与错误提示、命令行帮助默认跟随操作系统首选语言：中文语言环境（zh，包含简繁体地区设置）显示简体中文，其他语言环境显示英文。macOS 使用 AppleLanguages 第一首选语言，Windows 使用用户界面语言，Linux 使用 locale 环境变量。修改系统语言后需重启软件。
+
+命令行可使用 `--lang auto|zh|en` 覆盖，桌面和命令行均支持 `IA_UPLOADER_LANG=zh` 或 `IA_UPLOADER_LANG=en` 环境变量。显式命令行参数优先于环境变量；语言切换不修改文件名、元数据或上传行为。
+
+```sh
+./target/release/ia-upload-cli --lang en --help
+./target/release/ia-upload-cli auth --lang zh
+IA_UPLOADER_LANG=en cargo run --bin ia-uploader
+```
 
 ## 桌面界面
 
@@ -120,7 +132,7 @@ cargo fmt --check
 
 在 macOS 执行 `sh scripts/package-dmg.sh`，会重新构建应用并生成当前本机架构的压缩 DMG、SHA-256 校验文件。安装镜像包含桌面应用、指向 Applications 的拖拽安装入口、命令行工具及中文说明。双击 DMG，将应用拖入 Applications 后即可推出镜像。
 
-当前产物：`dist/Internet-Archive-Uploader-0.1.1-macOS-arm64.dmg`，适用于 Apple Silicon Mac。镜像内应用使用本地临时签名，尚未进行 Apple 开发者签名及公证。
+当前产物：`dist/Internet-Archive-Uploader-0.1.2-macOS-arm64.dmg`，适用于 Apple Silicon Mac。镜像内应用使用本地临时签名，尚未进行 Apple 开发者签名及公证。
 
 ## 应用图标
 

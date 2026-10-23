@@ -1,6 +1,6 @@
 [package]
 name = "ia-uploader"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Streaming Internet Archive uploader"
 license = "MIT"
