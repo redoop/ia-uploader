@@ -1,0 +1,31 @@
+[package]
+name = "ia-uploader"
+version = "0.1.1"
+edition = "2024"
+description = "Streaming Internet Archive uploader"
+license = "MIT"
+
+default-run = "ia-uploader"
+
+[[bin]]
+name = "ia-uploader"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "ia-upload-cli"
+path = "src/bin/cli.rs"
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe", "dep:rfd"]
+
+[dependencies]
+eframe = { optional = true, version = "0.33", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+rfd = { version = "0.17", optional = true }
+
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "system-proxy", "socks"] }
+serde_json = "1"
+percent-encoding = "2"
